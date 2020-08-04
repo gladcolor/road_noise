@@ -1,6 +1,9 @@
 from PIL import Image
 import os
 import glob
+import collections
+
+import matplotlib.pyplot as plt
 
 import torch
 import torchvision
@@ -116,8 +119,72 @@ def inference():
             print(f"{basename}")
 
 
-def inference_to_docx():
+# https://www.zhihu.com/question/68384370 通过pytorch的hook机制简单实现了一下，只输出conv层的特征图。
+
+def viz(module, input):
+    x = input[0][0]
+    #最多显示4张图
+    min_num = np.minimum(4, x.size()[0])
+    for i in range(min_num):
+        plt.subplot(1, 4, i+1)
+        plt.imshow(x[i])
+    plt.show()
+
+def viz2(module, input):
+    print("type of input:", type(input))
+    print("len of input:", len(input))
+    print("Hook input:", input)
+
+def getInceptionFeature():
+    model_path = r'inception_all.pth'
+
+    model = torch.load(model_path)
+    model.eval()
+
+    for name, m in model.named_modules():
+        if isinstance(m, torch.nn.Linear):
+            m.register_forward_pre_hook(viz2)
+
+
+    print(model)
+
+    features_model = torch.nn.Sequential(collections.OrderedDict(list(model.named_children())[:-1]))
+    print(features_model)
+    features_model.eval()
+
+    # test_image_path = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\building_images2\hlvA4Deozc_zh2J-gDUVUg_-70.975509_42.372362_0_82.00.jpg'
+    # images = glob.glob(r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\building_images2\*.jpg')
+    df = pd.read_csv(r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\val.csv')
     img_dir = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\building_images2'
+    images = []
+    device = 'cpu'
+    input_size = 299
+    for idx, row in df.iterrows():
+        images.append(os.path.join(img_dir, row['image']))
+
+    copy_to = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\label1'
+    print(f'Images counts: {len(images)}')
+    for jpg in images:
+        basename = os.path.basename(jpg)
+
+        img = Image.open(jpg)
+        img = transforms.Resize(input_size)(img)
+        img = transforms.ToTensor()(img)
+        img = torch.unsqueeze(img, 0)
+        img = img.to(device)
+
+        with torch.no_grad():
+            result = model(img)
+        # result = features_model(img)
+        # result = model(img)
+
+        logger.info(os.path.basename(jpg))
+        logger.info(result.cpu().detach().numpy())
+
+
+
+def inference_to_docx():
+    img_dir = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\random100'
     model_path = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\project_code\inception_all.pth'
     classifier = ImageClassifier(model_path=model_path)
 
@@ -191,15 +258,142 @@ def inference_to_docx():
 
         f.writelines(f'{jpg},{predict},{truth}\n')
 
-    document.save(r"K:\Research\Resilience\val_results.docx")
+    document.save(r"K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\random100\reference_results.docx")
 
-        # row_cells = tbl.add_row().cells
+def inference_folder_to_docx():
+        img_dir = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\random100'
+        model_path = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\project_code\inception_all.pth'
+        classifier = ImageClassifier(model_path=model_path)
 
-        # if predict == 1:
-        #     new_name = os.path.join(copy_to, basename)
-        #     shutil.copyfile(jpg, new_name)
-        #     print(f"{basename}")
+        # docx operation
+        template = docx.Document(r'K:\Research\Resilience\template.docx')
+        t_table = template.tables[0]._tbl
+        document = docx.Document()
+
+
+        predict_file = os.path.join(img_dir, "inferenced.csv")
+        log_txt_name = os.path.join(img_dir,  'info.log')
+
+
+        images = glob.glob(os.path.join(img_dir, "*.jpg"))
+
+        yaml_path = 'log_config.yaml'
+        setup_logging(yaml_path, logName=log_txt_name)
+        # logger.info(os.path.basename(file))
+
+        # copy_to = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\label1'
+        print(f'Images counts: {len(images)}')
+        f = open(predict_file, 'w')
+        f.writelines("image,predict,label\n")
+        for idx, jpg in enumerate(images[:]):
+            jpg = os.path.join(img_dir, jpg)
+
+            result = classifier.image_inference(jpg)
+            basename = os.path.basename(jpg)
+            predict = np.argmax(result)
+            info = f"{basename} | predict: {predict}"
+            logger.info(info)
+            # print()
+
+            # docx operation
+            new_tbl = deepcopy(t_table)
+            paragraph = document.add_paragraph()
+            paragraph._p.addnext(new_tbl)
+
+            new_tbl = document.tables[idx]
+
+            new_tbl.rows[0].cells[0].text = basename
+
+            #     row_cells = tbl.add_row().cells
+            paragraph = new_tbl.rows[1].cells[0].paragraphs[0]
+            run = paragraph.add_run()
+            run.add_picture(jpg, width=2500000, height=3300000)
+
+            # fill prediction:
+            if predict == 1:
+                new_tbl.rows[1].cells[2].text = "resilience"
+            else:
+                new_tbl.rows[1].cells[2].text = "non_resilience"
+
+            # two tabels per page
+            table_cnt = idx + 1
+            if (table_cnt % 2 == 0) and (table_cnt > 0):
+                document.add_page_break()
+
+            f.writelines(f'{jpg},{predict}\n')
+        saved_docx = os.path.join(img_dir, "inferenced.docx")
+        document.save(saved_docx)
+
+
+def results_to_docx():
+    img_dir = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\random100'
+    result_file = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\random100\sample ys.csv'
+
+    df = pd.read_csv(result_file)
+
+    # docx operation
+    template = docx.Document(r'K:\Research\Resilience\template.docx')
+    t_table = template.tables[0]._tbl
+    document = docx.Document()
+
+
+    log_txt_name = os.path.join(img_dir, 'info.log')
+
+
+    yaml_path = 'log_config.yaml'
+    setup_logging(yaml_path, logName=log_txt_name)
+    # logger.info(os.path.basename(file))
+
+    # copy_to = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\label1'
+    print(f'CSV row: {len(df)}')
+
+    for idx, row in df.iterrows():
+        try:
+            jpg = row['imageUrl']
+            basename = os.path.basename(jpg)
+            jpg = os.path.join(img_dir, basename)
+
+
+            info = f"{basename} "
+            logger.info(info)
+            # print()
+
+            # docx operation
+            new_tbl = deepcopy(t_table)
+            paragraph = document.add_paragraph()
+            paragraph._p.addnext(new_tbl)
+
+            new_tbl = document.tables[idx]
+
+            new_tbl.rows[0].cells[0].text = basename
+
+            #     row_cells = tbl.add_row().cells
+            paragraph = new_tbl.rows[1].cells[0].paragraphs[0]
+            run = paragraph.add_run()
+            run.add_picture(jpg, width=2500000, height=3300000)
+
+            # fill the label:
+            keyTag = row['keyTag']
+            notes = row['notes']
+            new_tbl.rows[2].cells[2].text = keyTag
+            new_tbl.rows[4].cells[2].text = notes
+
+            # two tabels per page
+            table_cnt = idx + 1
+            if (table_cnt % 2 == 0) and (table_cnt > 0):
+                document.add_page_break()
+
+        except Exception as e:
+            logger.error(e)
+            continue
+
+    saved_docx = os.path.join(img_dir, "results.docx")
+    document.save(saved_docx)
+
 if __name__ == "__main__":
-    inference_to_docx();
+    # inference_to_docx();
+    # inference_folder_to_docx()
 
+    # results_to_docx()
 
+    getInceptionFeature()
