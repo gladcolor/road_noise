@@ -2,23 +2,27 @@ from __future__ import print_function, division
 import os
 import torch
 import pandas as pd
-from skimage import io, transform
+# from skimage import io, transform
 import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, utils
 from PIL import Image
-
+import glob
+from tqdm import tqdm
 # Ignore warnings
 import warnings
 warnings.filterwarnings("ignore")
+
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 plt.ion()   # interactive mode
 
 class ImageListDataset(Dataset):
     """Face Landmarks dataset."""
 
-    def __init__(self, csv_file, img_dir, transform=None):
+    def __init__(self, csv_file, img_dir, transform=None, verify_files=False):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -26,7 +30,24 @@ class ImageListDataset(Dataset):
             transform (callable, optional): Optional transform to be applied
                 on a sample.
         """
-        self.img_list = pd.read_csv(csv_file)
+        img_list_df = pd.read_csv(csv_file)
+        img_list_df.iloc[:, 0] = img_list_df.iloc[:, 0] + "_2.jpg"
+        # img_list_df = img_list_df[['panoId', 'class_id', 'noise']]
+
+        if verify_files:
+            not_exists_files = []
+            for idx in range(len(img_list_df)):
+                img_name = os.path.join(img_dir,
+                                        img_list_df.iloc[idx, 0])
+                if not os.path.exists(img_name):
+                    not_exists_files.append(idx)
+            dropped_rows = img_list_df.iloc[not_exists_files].copy()
+            img_list_df = img_list_df.drop(not_exists_files)
+            print(f"Dropped {len(not_exists_files)} rows:\n", dropped_rows)
+            img_list_df.to_csv(csv_file, index=False)
+
+
+        self.img_list = img_list_df
         self.img_dir = img_dir
         self.transform = transform
 
@@ -36,12 +57,25 @@ class ImageListDataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-
+        basename = self.img_list.iloc[idx, 0]
+        basename = basename[:22] + "_2.jpg"
         img_name = os.path.join(self.img_dir,
-                                self.img_list.iloc[idx, 0])
+                                basename)
         # image = io.imread(img_name)
-        image = Image.open(img_name)
-        class_id = self.img_list.iloc[idx, 1]
+        class_id = self.img_list.loc[idx, 'class_id']
+        try:
+            image = Image.open(img_name)
+        except Exception as e:
+            # print("Error in __getitem__(), using the first row:", e, img_name)
+            basename = self.img_list.iloc[0, 0]
+            basename = basename[:22] + "_2.jpg"
+            img_name = os.path.join(self.img_dir,
+                                    basename)
+            image = Image.open(img_name)
+            class_id = self.img_list.loc[0,  'class_id']
+            # print("First row: ", img_name, class_id)
+
+
         # landmarks = np.array([landmarks])
         # landmarks = landmarks.astype('float').reshape(-1, 2)
         sample = {'image': image, 'class_id': class_id}
@@ -145,6 +179,20 @@ class ToTensor(object):
         return {'image': torch.from_numpy(image),
                 'class_id':class_id}
 
+def verfiy_im():
+    imgs = glob.glob(r'K:\Research\Noise_map\panoramas4_jpg_half\*.jpg')
+    for img in tqdm(imgs):
+        try:
+            im = Image.open(img)
+            im.verify() #I perform also verify, don't know if he sees other types o defects
+            im.close() #reload is necessary in my case
+
+
+        except Exception as e:
+          #manage excetions here
+            print(f"Image file {img} is broken. {e}")
+
 if __name__ == "__main__":
-    image_list_dataset = test_image_list_data_loader()
-    print(len(image_list_dataset))
+    # image_list_dataset = test_image_list_data_loader()
+    # print(len(image_list_dataset))
+    verfiy_im()
