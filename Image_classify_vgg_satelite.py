@@ -13,10 +13,11 @@ import os
 import copy
 import sys
 import Pytorch_custom_dataloader_4in1 as custom_data_4in1
-import Pytorch_custom_dataloader as custom_data
+import Pytorch_custom_dataloader_satellite as custom_data
 import road_vgg as road_vgg_nn
 import vgg_classify
 import vgg_classify_noise
+import vgg_classify_satelite as vgg_sate
 
 import logging
 import yaml
@@ -114,14 +115,12 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Fa
 
         print("VGG model:", model_ft)
 
-    elif model_name == "squeezenet":
-        """ Squeezenet
+    elif model_name == "vgg_satellite":
+        """ vgg_satellite
         """
-        model_ft = models.squeezenet1_0(pretrained=use_pretrained)
+        model_ft = vgg_sate.vgg16_bn(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
-        model_ft.num_classes = num_classes
-        input_size = 224
+
 
     elif model_name == "densenet":
         """ Densenet
@@ -157,13 +156,13 @@ if __name__ == '__main__':
     print("Torchvision Version: ", torchvision.__version__)
     data_dir = r"K:\OneDrive_USC\OneDrive - University of South Carolina\Research\noise_map"
 
-    # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception, efficientnet_b6]
-    model_name = "resnet"
+    # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception, c]
+    model_name = "vgg_satellite"
 
     # Number of classes in the dataset
     num_classes = 7
 
-    loss_plot_saved_name = r'K:\Research\Noise_map\train_loss_plots\train_loss_%s_classify.png' % model_name
+    loss_plot_saved_name = r'K:\Research\Noise_map\train_loss_plots\train_loss_%s_classify_vgg_satellite.png' % model_name
     # Batch size for training (change depending on how much memory you have)
     # if len(sys.argv) > 1:
     #     batch_size = 2 ** int(sys.argv[1])
@@ -172,12 +171,12 @@ if __name__ == '__main__':
 
     # print("Batch size:", batch_size)
 
-    batch_size = 1
+    batch_size = 16
 
     print("Batch size:", batch_size)
 
     # Number of epochs to train for
-    num_epochs = 9
+    num_epochs = 10
 
     # Flag for feature extracting. When False, we finetune the whole model,
     #   when True we only update the reshaped layer params
@@ -378,7 +377,7 @@ if __name__ == '__main__':
     if os.path.exists(PATH):
         model_ft.load_state_dict(torch.load(PATH))
 
-    input_size = (int(256), int(512*4))
+    input_size = (int(310), int(310))
     # input_size = (int(256*2), int(1024*2))
 
     data_transforms = {
@@ -406,12 +405,12 @@ if __name__ == '__main__':
 
     image_datasets = {x: custom_data.ImageListDataset(os.path.join(data_dir, x + '.csv'),
                                                       # r'K:\Research\Noise_map\thumnails176k',
-                                                      r'K:\Research\Noise_map\panoramas4_jpg_half',
+                                                      r'K:\Research\Noise_map\NAIP_clipped',
                                                       transform=data_transforms[x]) for x in ['train', 'val']}  # huan
 
     # Create training and validation dataloaders
     dataloaders_dict = {
-        x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=8) for x in
+        x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=10) for x in
         ['train', 'val']}
 
     # Detect if we have a GPU available

@@ -12,16 +12,21 @@ import time
 import os
 import copy
 import sys
-import Pytorch_custom_dataloader_4in1 as custom_data_4in1
-import Pytorch_custom_dataloader as custom_data
+# import Pytorch_custom_dataloader_4in1 as custom_data_4in1
+import Pytorch_custom_dataloader_2in1 as custom_data
+
+# import Pytorch_custom_dataloader as custom_data
 import road_vgg as road_vgg_nn
 import vgg_classify
 import vgg_classify_noise
+import road_vgg_2in1
 
 import logging
 import yaml
 import logging.config
 import matplotlib.pyplot as plt
+plt.ion()
+plt.ioff()
 # import efficientnet_huan
 import resnet_road
 #
@@ -31,6 +36,7 @@ from sklearn.metrics import classification_report
 import torch.optim.lr_scheduler as scheduler
 
 import sys
+
 
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -114,14 +120,11 @@ def initialize_model(model_name, num_classes, feature_extract, use_pretrained=Fa
 
         print("VGG model:", model_ft)
 
-    elif model_name == "squeezenet":
+    elif model_name == "vgg_2in1":
         """ Squeezenet
         """
-        model_ft = models.squeezenet1_0(pretrained=use_pretrained)
+        model_ft = road_vgg_2in1.vgg16_bn(pretrained=use_pretrained)
         set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
-        model_ft.num_classes = num_classes
-        input_size = 224
 
     elif model_name == "densenet":
         """ Densenet
@@ -157,8 +160,8 @@ if __name__ == '__main__':
     print("Torchvision Version: ", torchvision.__version__)
     data_dir = r"K:\OneDrive_USC\OneDrive - University of South Carolina\Research\noise_map"
 
-    # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception, efficientnet_b6]
-    model_name = "resnet"
+    # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception, c]
+    model_name = "vgg_2in1"
 
     # Number of classes in the dataset
     num_classes = 7
@@ -172,12 +175,12 @@ if __name__ == '__main__':
 
     # print("Batch size:", batch_size)
 
-    batch_size = 1
+    batch_size = 8
 
     print("Batch size:", batch_size)
 
     # Number of epochs to train for
-    num_epochs = 9
+    num_epochs = 10
 
     # Flag for feature extracting. When False, we finetune the whole model,
     #   when True we only update the reshaped layer params
@@ -199,6 +202,7 @@ if __name__ == '__main__':
                 print('-' * 10)
 
                 # Each epoch has a training and validation phase
+                # for phase in ['val', 'train']:
                 for phase in ['train', 'val']:
                     if phase == 'train':
                         model.train()  # Set model to training mode
@@ -219,7 +223,7 @@ if __name__ == '__main__':
 
                         try:
 
-                            inputs = inputs.to(device, dtype=torch.float)
+                            inputs = [ip.to(device, dtype=torch.float) for ip in inputs]
                             labels = labels.to(device)#.float()
 
                             # zero the parameter gradients
@@ -261,7 +265,7 @@ if __name__ == '__main__':
                                     optimizer.step()
 
                             # statistics
-                            running_loss += loss.item() * inputs.size(0)
+                            running_loss += loss.item() * inputs[0].size(0)
                             running_corrects += torch.sum(preds == labels.data)
 
                             print_interval = 100
@@ -271,7 +275,7 @@ if __name__ == '__main__':
 
                             if idx % print_interval == 0:
                                 step_loss =  loss.item()
-                                step_acc = 1.0 * torch.sum(preds == labels.data) / len(inputs)
+                                step_acc = 1.0 * torch.sum(preds == labels.data) / len(inputs[0])
                                 # step_acc = 0
 
                                 print('\n{} Step-Loss: {:.4f} Step-Acc: {:.4f}'.format(os.path.basename(phase), step_loss,
@@ -378,19 +382,19 @@ if __name__ == '__main__':
     if os.path.exists(PATH):
         model_ft.load_state_dict(torch.load(PATH))
 
-    input_size = (int(256), int(512*4))
+    # input_size = (int(512), int(512*1))
     # input_size = (int(256*2), int(1024*2))
 
     data_transforms = {
         'train': transforms.Compose([
-            transforms.Resize(input_size),
-            transforms.RandomHorizontalFlip(),
+            # transforms.Resize(input_size),
+            # transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.RandomHorizontalFlip(p=0.5)
             # transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]),
         'val': transforms.Compose([
-            transforms.Resize(input_size),
+            # transforms.Resize(input_size),
             # transforms.CenterCrop(input_size),
             transforms.ToTensor()
             # transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
@@ -406,13 +410,15 @@ if __name__ == '__main__':
 
     image_datasets = {x: custom_data.ImageListDataset(os.path.join(data_dir, x + '.csv'),
                                                       # r'K:\Research\Noise_map\thumnails176k',
-                                                      r'K:\Research\Noise_map\panoramas4_jpg_half',
+                                                      img_dir=r'K:\Research\Noise_map\panoramas4_jpg_half',
+                                                      satellite_dir=r'K:\Research\Noise_map\NAIP_clipped_jpg',
                                                       transform=data_transforms[x]) for x in ['train', 'val']}  # huan
 
     # Create training and validation dataloaders
     dataloaders_dict = {
         x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=8) for x in
-        ['train', 'val']}
+        # ['train', 'val']}
+        ['val', 'train']}
 
     # Detect if we have a GPU available
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -442,7 +448,7 @@ if __name__ == '__main__':
                 pass
 
     # Observe that all parameters are being optimized0
-    optimizer_ft = optim.SGD(params_to_update, lr=0.0001, momentum=0.9)
+    optimizer_ft = optim.SGD(params_to_update, lr=0.00001, momentum=0.9)
     # optimizer_ft = optim.Adam(params_to_update, lr=0.0001)
 
     # Setup the loss fxn

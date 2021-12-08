@@ -13,7 +13,7 @@ from torchvision import datasets, models, transforms
 import shutil
 import pandas as pd
 
-import docx
+# import docx
 import glob
 # import ospseg
 
@@ -23,6 +23,8 @@ import logging
 import yaml
 import logging.config
 
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import classification_report
 
 
 def setup_logging(default_path='log_config.yaml', logName='', default_level=logging.DEBUG):
@@ -51,7 +53,7 @@ class ImageClassifier():
         Be careful, expects (299,299) sized images and has auxiliary output
         """
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        self.device = 'cpu'
+        # self.device = 'cpu'
 
         # model_ft = models.inception_v3(pretrained=None)
         # num_classes = 2
@@ -91,33 +93,55 @@ class ImageClassifier():
         img = torch.unsqueeze(img, 0)
         img = img.to(self.device)
         result = self.model(img)
-        logger.info(os.path.basename(image_path))
-        logger.info(result.cpu().detach().numpy())
+        # logger.info(os.path.basename(image_path))
+        # logger.info(result.cpu().detach().numpy())
         result = nn.Softmax()(result)
 
         return result.cpu().detach().numpy()
 
-def inference():
-    model_path = r'inception.pth'
-    classifier = ImageClassifier(model_path=model_path)
-    # test_image_path = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\building_images2\hlvA4Deozc_zh2J-gDUVUg_-70.975509_42.372362_0_82.00.jpg'
-    # images = glob.glob(r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\building_images2\*.jpg')
-    df = pd.read_csv(r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\val.csv')
-    images = []
-    for idx, row in df.iterrows():
-        images.append(row['image'])
+def softmax(predicts):
+    exp = np.exp(predicts)
+    probability = exp / np.sum(exp)
+    return probability
 
-    copy_to = r'K:\OneDrive_NJIT\OneDrive - NJIT\Research\Resilience\data\boston\label1'
+
+def inference():
+    model_path = r'K:\Research\Noise_map\python_code\vgg_noise_all.pth'
+    classifier = ImageClassifier(model_path=model_path, input_size=(256, 1024))
+
+    df = pd.read_csv(r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\noise_map\val.csv')
+    df['predict'] = ''
+    images = []
+    predicts = []
+    img_dir = r'K:\Research\Noise_map\panoramas4_jpg_half'
+    for idx, row in df.iterrows():
+        basename = row['panoId'] + '_2.jpg'
+        img_path = os.path.join(img_dir, basename)
+        images.append(img_path)
+
     print(f'Images counts: {len(images)}')
-    for jpg in images:
+    for idx, jpg in enumerate(images):
         result = classifier.image_inference(jpg)
+        # result = softmax(result)
         basename = os.path.basename(jpg)
-        label = np.argmax(result)
-        # print(f"{basename} | label: {label}")
-        if label == 1:
-            new_name = os.path.join(copy_to, basename)
-            shutil.copyfile(jpg, new_name)
-            print(f"{basename}")
+        pred = np.argmax(result)
+        label = df.iloc[idx]['class_id']
+        print(f"{idx}/{len(images)} {basename} | pred: {pred}: label: {label}")
+        df.at[idx, 'predict'] = pred
+        # predicts.append(jpg, label)
+
+    # save the results file
+
+    df.to_csv(r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\noise_map\predict.csv', index=False)
+
+
+def print_confusion_matrix():
+    df = pd.read_csv(r'K:\OneDrive_USC\OneDrive - University of South Carolina\Research\noise_map\predict.csv')
+    grouth_truths = df['class_id'].to_list()
+    predicts =  df['predict'].to_list()
+    cm = confusion_matrix(grouth_truths, predicts)
+    print("Confusion matric:\n", cm)
+    print(classification_report(grouth_truths, predicts))
 
 
 # https://www.zhihu.com/question/68384370 通过pytorch的hook机制简单实现了一下，只输出conv层的特征图。
@@ -534,6 +558,8 @@ if __name__ == "__main__":
     # inference_folder_to_docx()
 
     # results_to_docx()
-    results_to_docx_3person()
+    # results_to_docx_3person()
 
     # getInceptionFeature()
+    # inference()
+    print_confusion_matrix()

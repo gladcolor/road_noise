@@ -12,23 +12,20 @@ import time
 import os
 import copy
 import sys
-import Pytorch_custom_dataloader_4in1 as custom_data_4in1
-import Pytorch_custom_dataloader as custom_data
-import road_vgg as road_vgg_nn
-import vgg_classify
-import vgg_classify_noise
+# import Pytorch_custom_dataloader_4in1 as custom_data_4in1
+import Pytorch_custom_dataloader_regression as custom_data
+# import road_vgg as road_vgg_nn
+# import Pytorch_custom_dataloader_regression
+import vgg_regression
 
 import logging
 import yaml
 import logging.config
 import matplotlib.pyplot as plt
 # import efficientnet_huan
-import resnet_road
-#
+
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
-
-import torch.optim.lr_scheduler as scheduler
 
 import sys
 
@@ -58,99 +55,6 @@ def plot_loss(saved_name, train_losses):
     print(f"Saved plot: {saved_name}.")
     plt.close()
 
-def initialize_model(model_name, num_classes, feature_extract, use_pretrained=False):
-    # Initialize these variables which will be set in this if statement. Each of these
-    #   variables is model specific.
-    model_ft = None
-    input_size = 0
-
-    if model_name == "efficientnet_b6":
-
-        model_ft = models.efficientnet_b6(pretrained=use_pretrained)
-        # print("EfficientNet:", model_ft)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        # num_ftrs =model_ft.classifier[1].in_features
-        # model_ft.classifier[1] = nn.Linear(num_ftrs, num_classes)
-        # input_size = 224
-
-        print("efficientnet_b6 model:", model_ft)
-
-    elif model_name == "resnet":
-        """ Resnet18
-        """
-        model_ft = resnet_road.resnet101(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        # num_ftrs = model_ft.fc.in_features
-        # model_ft.fc = nn.Linear(num_ftrs, num_classes)
-        # input_size = 224
-
-        print("ResNet model:", model_ft)
-
-    elif model_name == "vgg_noise":
-        """ VGG11_bn
-        """
-        model_ft = vgg_classify_noise.vgg16_bn(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        # print("VGG model,  model_ft.classifier[6].in_features:",  model_ft.classifier[0].in_features)
-        # print("VGG model, features:",  model_ft.features)
-        # num_ftrs = model_ft.classifier[6].in_features
-        # model_ft.classifier[0] = nn.Linear(512 * 16 * 64, 1024)
-        # model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
-
-        print("VGG model:", model_ft)
-
-    elif model_name == "vgg":
-        """ VGG11_bn
-        """
-        model_ft = vgg_classify.vgg16_bn(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        # print("VGG model,  model_ft.classifier[6].in_features:",  model_ft.classifier[0].in_features)
-        # print("VGG model, features:",  model_ft.features)
-        # num_ftrs = model_ft.classifier[6].in_features
-        # model_ft.classifier[0] = nn.Linear(512 * 16 * 64, 1024)
-        # model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
-
-        print("VGG model:", model_ft)
-
-    elif model_name == "squeezenet":
-        """ Squeezenet
-        """
-        model_ft = models.squeezenet1_0(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
-        model_ft.num_classes = num_classes
-        input_size = 224
-
-    elif model_name == "densenet":
-        """ Densenet
-        """
-        model_ft = models.densenet121(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.classifier.in_features
-        model_ft.classifier = nn.Linear(num_ftrs, num_classes)
-        input_size = 224
-
-    elif model_name == "inception":
-        """ Inception v3
-        Be careful, expects (299,299) sized images and has auxiliary output
-        """
-        model_ft = models.inception_v3(pretrained=use_pretrained)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        # Handle the auxilary net
-        num_ftrs = model_ft.AuxLogits.fc.in_features
-        model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
-        # Handle the primary net
-        num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs, num_classes)
-        input_size = 299
-
-    else:
-        print("Invalid model name, exiting...")
-        exit()
-
-    return model_ft, input_size
 
 if __name__ == '__main__':
     print("PyTorch Version: ", torch.__version__)
@@ -158,40 +62,38 @@ if __name__ == '__main__':
     data_dir = r"K:\OneDrive_USC\OneDrive - University of South Carolina\Research\noise_map"
 
     # Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, inception, efficientnet_b6]
-    model_name = "resnet"
+    model_name = "vgg_regression"
 
     # Number of classes in the dataset
     num_classes = 7
 
-    loss_plot_saved_name = r'K:\Research\Noise_map\train_loss_plots\train_loss_%s_classify.png' % model_name
     # Batch size for training (change depending on how much memory you have)
-    # if len(sys.argv) > 1:
-    #     batch_size = 2 ** int(sys.argv[1])
-    # else:
-    #     batch_size = 2 ** 3
+    if len(sys.argv) > 1:
+        batch_size = 2 ** int(sys.argv[1])
+    else:
+        batch_size = 2 ** 3
 
     # print("Batch size:", batch_size)
 
-    batch_size = 1
+    batch_size = 4
 
     print("Batch size:", batch_size)
 
     # Number of epochs to train for
-    num_epochs = 9
+    num_epochs = 15
 
     # Flag for feature extracting. When False, we finetune the whole model,
     #   when True we only update the reshaped layer params
     feature_extract = False
 
 
-    def train_model(model, dataloaders, criterion, optimizer, lr_scheduler, num_epochs=15, is_inception=False):
+    def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_inception=False):
         since = time.time()
 
         val_acc_history = []
         train_batch_losses = []
         best_model_wts = copy.deepcopy(model.state_dict())
         best_acc = 0
-
 
         try:
             for epoch in range(num_epochs):
@@ -220,7 +122,7 @@ if __name__ == '__main__':
                         try:
 
                             inputs = inputs.to(device, dtype=torch.float)
-                            labels = labels.to(device)#.float()
+                            labels = labels.to(device).float()
 
                             # zero the parameter gradients
                             optimizer.zero_grad()
@@ -242,8 +144,8 @@ if __name__ == '__main__':
                                     outputs = model(inputs)
                                     loss = criterion(outputs, labels)
 
-                                _, preds = torch.max(outputs, 1)
-                                all_preds += list(preds.cpu().detach().numpy())
+                                # _, preds = torch.max(outputs, 1)
+                                # all_preds += list(preds.cpu().detach().numpy())
 
                                 previous_cnt = len(all_preds) - len(outputs)
                                 # for idx, output in enumerate(outputs):
@@ -262,7 +164,7 @@ if __name__ == '__main__':
 
                             # statistics
                             running_loss += loss.item() * inputs.size(0)
-                            running_corrects += torch.sum(preds == labels.data)
+                            # running_corrects += torch.sum(preds == labels.data)
 
                             print_interval = 100
 
@@ -271,32 +173,33 @@ if __name__ == '__main__':
 
                             if idx % print_interval == 0:
                                 step_loss =  loss.item()
-                                step_acc = 1.0 * torch.sum(preds == labels.data) / len(inputs)
-                                # step_acc = 0
+                                # step_acc = 1.0 * torch.sum(preds == labels.data) / len(inputs)
+                                step_acc = 0
 
                                 print('\n{} Step-Loss: {:.4f} Step-Acc: {:.4f}'.format(os.path.basename(phase), step_loss,
                                                                            step_acc))
-                                print("Learning rate:", lr_scheduler.get_lr())
                                 print("Label:", labels.data)
-                                print("Preds:", preds.data)
-                                # print("Output:", torch.reshape(outputs, (-1,)).data)
-                                # print("Diff:", labels - torch.reshape(outputs, (-1,)).data)
+                                print("Output:", torch.reshape(outputs, (-1,)).data)
+                                print("Diff:", labels - torch.reshape(outputs, (-1,)).data)
+
+                                for p in paths:
+                                    print("    ", p)
 
 
-                                cm = confusion_matrix(labels.data.cpu().numpy(), preds.data.cpu().numpy())
-                                print("Confusion matric:\n", cm)
-                                print(classification_report(labels.data.cpu().numpy(), preds.data.cpu().numpy()))
+                                # cm = confusion_matrix(labels.data.cpu().numpy(), preds.data.cpu().numpy())
+                                # print("Confusion matric:\n", cm)
+                                # print(classification_report(labels.data.cpu().numpy(), preds.data.cpu().numpy()))
                                 train_batch_losses.append(step_loss)
+                                saved_name = r'K:\Research\Noise_map\train_loss_plots\train_loss_regression.png'
+                                plot_loss(saved_name=saved_name, train_losses=train_batch_losses)
 
-                                plot_loss(saved_name=loss_plot_saved_name, train_losses=train_batch_losses)
 
-
-                                # if idx % 2000 == 0:
-                                #     torch.save(model.state_dict(), PATH)
-                                #     torch.save(model, PATH_ENTIRE_MODEL)
+                                if idx % 2000 == 0:
+                                    torch.save(model.state_dict(), PATH)
+                                    torch.save(model, PATH_ENTIRE_MODEL)
 
                         except Exception as e:
-                            print("Error in minibatch: ", e, idx, paths)
+                            print("Error in minibatch: ", idx, paths,  e)
                             exception_type, exception_object, exception_traceback = sys.exc_info()
                             filename = exception_traceback.tb_frame.f_code.co_filename
                             line_number = exception_traceback.tb_lineno
@@ -307,8 +210,8 @@ if __name__ == '__main__':
                             continue
 
                     epoch_loss = running_loss / len(dataloaders[phase].dataset)
-                    epoch_acc = 1.0 * running_corrects / len(dataloaders[phase].dataset)
-                    # epoch_acc = 0
+                    # epoch_acc = 1.0 * running_corrects / len(dataloaders[phase].dataset)
+                    epoch_acc = 0
 
                     # print('{} Loss: {:.4f} Acc: {:.4f}'.format(os.path.basename(phase), epoch_loss, epoch_acc))
                     print('{} Loss: {:.4f} Acc: {:.4f}'.format(os.path.basename(phase), epoch_loss, epoch_acc))
@@ -326,19 +229,14 @@ if __name__ == '__main__':
                         print(f"Current best: {best_acc}")
                         val_acc_history.append(epoch_acc)
 
-                        cm = confusion_matrix(labels.data.cpu().numpy(), preds.data.cpu().numpy())
-                        print("Confusion matric:\n", cm)
-
-                        print(classification_report(labels.data.cpu().numpy(), preds.data.cpu().numpy()))
+                        # print(classification_report(labels.data.cpu().numpy(), preds.data.cpu().numpy()))
 
                     # f = open(phase + '_predicts.csv', 'w')
                     # f.writelines("image,predict,label\n")
                     # for idx, path in enumerate(all_paths):
                     #     f.writelines("{},{},{}\n".format(path,  all_preds[idx], all_labels[idx]))
                     # f.close()
-                lr_scheduler.step()
-                print('Epoch {}/{} finished.'.format(epoch, num_epochs - 1))
-                print('-' * 10)
+
                 print()
         except KeyboardInterrupt:
             torch.save(model.state_dict(), PATH)
@@ -366,6 +264,90 @@ if __name__ == '__main__':
 
 
 
+    def initialize_model(model_name, num_classes, feature_extract, use_pretrained=False):
+        # Initialize these variables which will be set in this if statement. Each of these
+        #   variables is model specific.
+        model_ft = None
+        input_size = 0
+
+        if model_name == "efficientnet_b6":
+
+            model_ft = models.efficientnet_b6(pretrained=use_pretrained)
+            # print("EfficientNet:", model_ft)
+            set_parameter_requires_grad(model_ft, feature_extract)
+            num_ftrs =model_ft.classifier[1].in_features
+            model_ft.classifier[1] = nn.Linear(num_ftrs, num_classes)
+            input_size = 224
+
+            print("efficientnet_b6 model:", model_ft)
+
+        elif model_name == "resnet":
+            """ Resnet18
+            """
+            model_ft = models.resnet101(pretrained=use_pretrained)
+            set_parameter_requires_grad(model_ft, feature_extract)
+            num_ftrs = model_ft.fc.in_features
+            model_ft.fc = nn.Linear(num_ftrs, num_classes)
+            input_size = 224
+
+            print("ResNet model:", model_ft)
+
+        elif model_name == "vgg_regression":
+            model_ft = vgg_regression.vgg16_bn(pretrained=use_pretrained)
+            set_parameter_requires_grad(model_ft, feature_extract)
+
+
+        elif model_name == "vgg":
+            """ VGG11_bn
+            """
+            model_ft = road_vgg_nn.vgg16_bn(pretrained=use_pretrained)
+            set_parameter_requires_grad(model_ft, feature_extract)
+            # print("VGG model,  model_ft.classifier[6].in_features:",  model_ft.classifier[0].in_features)
+            # print("VGG model, features:",  model_ft.features)
+            # num_ftrs = model_ft.classifier[6].in_features
+            # model_ft.classifier[0] = nn.Linear(512 * 16 * 64, 1024)
+            # model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
+            input_size = 224
+
+            print("VGG model:", model_ft)
+
+        elif model_name == "squeezenet":
+            """ Squeezenet
+            """
+            model_ft = models.squeezenet1_0(pretrained=use_pretrained)
+            set_parameter_requires_grad(model_ft, feature_extract)
+            model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
+            model_ft.num_classes = num_classes
+            input_size = 224
+
+        elif model_name == "densenet":
+            """ Densenet
+            """
+            model_ft = models.densenet121(pretrained=use_pretrained)
+            set_parameter_requires_grad(model_ft, feature_extract)
+            num_ftrs = model_ft.classifier.in_features
+            model_ft.classifier = nn.Linear(num_ftrs, num_classes)
+            input_size = 224
+
+        elif model_name == "inception":
+            """ Inception v3
+            Be careful, expects (299,299) sized images and has auxiliary output
+            """
+            model_ft = models.inception_v3(pretrained=use_pretrained)
+            set_parameter_requires_grad(model_ft, feature_extract)
+            # Handle the auxilary net
+            num_ftrs = model_ft.AuxLogits.fc.in_features
+            model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
+            # Handle the primary net
+            num_ftrs = model_ft.fc.in_features
+            model_ft.fc = nn.Linear(num_ftrs, num_classes)
+            input_size = 299
+
+        else:
+            print("Invalid model name, exiting...")
+            exit()
+
+        return model_ft, input_size
 
 
     # # Initialize the model for this run
@@ -378,7 +360,7 @@ if __name__ == '__main__':
     if os.path.exists(PATH):
         model_ft.load_state_dict(torch.load(PATH))
 
-    input_size = (int(256), int(512*4))
+    input_size = (int(256*1), int(256*4))
     # input_size = (int(256*2), int(1024*2))
 
     data_transforms = {
@@ -405,7 +387,6 @@ if __name__ == '__main__':
     #                                                   transform=data_transforms[x]) for x in ['train', 'val']}  # huan
 
     image_datasets = {x: custom_data.ImageListDataset(os.path.join(data_dir, x + '.csv'),
-                                                      # r'K:\Research\Noise_map\thumnails176k',
                                                       r'K:\Research\Noise_map\panoramas4_jpg_half',
                                                       transform=data_transforms[x]) for x in ['train', 'val']}  # huan
 
@@ -442,17 +423,14 @@ if __name__ == '__main__':
                 pass
 
     # Observe that all parameters are being optimized0
-    optimizer_ft = optim.SGD(params_to_update, lr=0.0001, momentum=0.9)
+    optimizer_ft = optim.SGD(params_to_update, lr=0.00001, momentum=0.9)
     # optimizer_ft = optim.Adam(params_to_update, lr=0.0001)
 
     # Setup the loss fxn
-    criterion = nn.CrossEntropyLoss()
-    # criterion = nn.MSELoss()
-
-    lr_scheduler = scheduler.MultiStepLR(optimizer=optimizer_ft, milestones=[3, 3, 3], gamma=0.1, verbose=True)
+    # criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
 
     # Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, lr_scheduler=lr_scheduler, num_epochs=num_epochs,
-
+    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs,
                                  is_inception=(model_name == 'inception'))
 
